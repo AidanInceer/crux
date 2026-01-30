@@ -1,0 +1,199 @@
+{% extends 'planner/base.html' %}
+{% load planner_extras %}
+
+{% block extra_css %}
+<style>
+    .planner-container {
+        overflow-x: auto;
+        white-space: nowrap;
+        padding-bottom: 20px;
+    }
+
+    .day-card {
+        min-width: 140px;
+        min-height: 120px;
+        padding: 8px;
+        border: 1px solid #dee2e6;
+        border-radius: 8px;
+        margin: 4px;
+        cursor: pointer;
+        transition: box-shadow 0.2s;
+        background: white;
+        white-space: normal;
+    }
+
+    .day-card:hover {
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    }
+
+    .day-header {
+        font-weight: bold;
+        border-bottom: 1px solid #eee;
+        padding-bottom: 4px;
+        margin-bottom: 6px;
+    }
+
+    .today-highlight {
+        background-color: #fff3cd !important;
+        border: 2px solid #ffc107 !important;
+    }
+
+    .activity-tag {
+        display: inline-block;
+        font-size: 0.75rem;
+        padding: 2px 6px;
+        border-radius: 12px;
+        margin: 2px;
+        color: white;
+    }
+
+    .activity-tag.completed {
+        opacity: 0.7;
+        text-decoration: line-through;
+    }
+
+    .days-row {
+        display: flex;
+        flex-wrap: nowrap;
+        gap: 8px;
+        padding: 10px 0;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h2>{{ plan.name }}</h2>
+    <div class="d-flex align-items-center gap-3">
+        <span class="badge bg-{{ status_color }} text-white">
+            {{ status }} {% if status != "On Track" and status != "Not Active" %}({{ diff }}){% endif %}
+        </span>
+        <div class="text-muted small">
+            Completed: {{ completed_count }}/{{ total_sessions_count }}
+        </div>
+        <span class="badge bg-info text-dark">Start: {{ plan.start_date }}</span>
+        <span class="badge bg-warning text-dark">End: {{ plan.end_date }}</span>
+    </div>
+</div>
+
+<div class="planner-container">
+    <div class="days-row">
+        {% for date in dates %}
+        {% with date_sessions=session_map|get_session:date %}
+        <div class="day-card {% if date == today %}today-highlight{% endif %}" data-bs-toggle="modal"
+            data-bs-target="#dayModal" data-date="{{ date|date:'Y-m-d' }}"
+            data-formatted-date="{{ date|date:'D, M d' }}">
+            <div class="day-header">
+                <div>{{ date|date:"D" }}</div>
+                <div class="small text-muted">{{ date|date:"d M" }}</div>
+            </div>
+            <div class="activity-tags">
+                {% if date_sessions %}
+                {% for activity_id, session in date_sessions.items %}
+                <span class="activity-tag {% if session.completed %}completed{% endif %}"
+                    style="background-color: {{ session.activity_type.color }};" title="{{ session.notes }}">
+                    {% if session.completed %}✓{% endif %}
+                    {{ session.activity_type.name }}
+                </span>
+                {% endfor %}
+                {% else %}
+                <span class="text-muted small">Click to add</span>
+                {% endif %}
+            </div>
+        </div>
+        {% endwith %}
+        {% endfor %}
+    </div>
+</div>
+
+<div class="mt-4">
+    <h4>Legend</h4>
+    <div class="d-flex flex-wrap gap-2">
+        {% for activity in activity_types %}
+        <div class="badge" style="background-color: {{ activity.color }};">{{ activity.name }}</div>
+        {% endfor %}
+        <a href="{% url 'activity_list' %}" class="btn btn-sm btn-outline-secondary ms-2">Manage Activities</a>
+    </div>
+</div>
+
+<!-- Day Modal -->
+<div class="modal fade" id="dayModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Manage Activities for <span id="modalDateTitle"></span></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form action="{% url 'sessions_bulk_update' %}" method="POST">
+                {% csrf_token %}
+                <div class="modal-body">
+                    <input type="hidden" name="plan_id" value="{{ plan.id }}">
+                    <input type="hidden" name="date" id="modalDate">
+
+                    <p class="text-muted small">Select activities for this day:</p>
+
+                    {% for activity in activity_types %}
+                    <div class="form-check mb-2 p-2 border rounded"
+                        style="border-left: 4px solid {{ activity.color }} !important;">
+                        <input class="form-check-input" type="checkbox" name="activities" value="{{ activity.id }}"
+                            id="activity_{{ activity.id }}">
+                        <label class="form-check-label" for="activity_{{ activity.id }}">
+                            <strong>{{ activity.name }}</strong>
+                            {% if activity.description %}<br><small class="text-muted">{{ activity.description
+                                }}</small>{% endif %}
+                        </label>
+                    </div>
+                    {% empty %}
+                    <div class="alert alert-warning">
+                        No activities defined. <a href="{% url 'activity_list' %}">Create some first</a>.
+                    </div>
+                    {% endfor %}
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save Activities</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // Scroll to today on load
+    document.addEventListener("DOMContentLoaded", function () {
+        const todayEl = document.querySelector('.today-highlight');
+        if (todayEl) {
+            todayEl.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+        }
+    });
+
+    // Modal Handling
+    const dayModal = document.getElementById('dayModal');
+    dayModal.addEventListener('show.bs.modal', function (event) {
+        const card = event.relatedTarget;
+        const date = card.getAttribute('data-date');
+        const formattedDate = card.getAttribute('data-formatted-date');
+
+        document.getElementById('modalDate').value = date;
+        document.getElementById('modalDateTitle').textContent = formattedDate;
+
+        // Reset all checkboxes
+        document.querySelectorAll('input[name="activities"]').forEach(cb => cb.checked = false);
+
+        // Get existing sessions for this date from the card's tags
+        const tags = card.querySelectorAll('.activity-tag');
+        tags.forEach(tag => {
+            // Match by activity name - find checkbox with matching label
+            const activityName = tag.textContent.replace('✓', '').trim();
+            document.querySelectorAll('.form-check-label strong').forEach(label => {
+                if (label.textContent.trim() === activityName) {
+                    const checkbox = label.closest('.form-check').querySelector('input');
+                    if (checkbox) checkbox.checked = true;
+                }
+            });
+        });
+    });
+</script>
+{% endblock %}
